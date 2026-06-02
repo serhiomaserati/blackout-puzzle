@@ -1,23 +1,28 @@
 // ───────────────────────────────────────────────────────────────────────────
-// Чистая логика игры «Lights Out» (без React и DOM — легко тестировать).
+// Ядро игры «Word Guess» (Wordle-style).
 //
 // Правила:
-//  • Поле 5×5. Каждый тайл вкл (true) или выкл (false).
-//  • Нажатие инвертирует сам тайл и 4 ортогональных соседа (без диагоналей).
-//  • Цель — погасить всё (все false).
-//  • Ежедневная головоломка детерминирована: сид = текущая дата (UTC).
-//    Доска ВСЕГДА решаема, т.к. строится из решённого поля обратным ходом:
-//    берём «всё выкл» и применяем N валидных нажатий (N = 6..10 по сиду).
-//    Это N сохраняем как "par" (эталонное число ходов).
+//  • Загадано слово из 5 букв, у игрока 6 попыток.
+//  • После каждой догадки каждая буква подсвечивается:
+//      correct  (🟩) — буква на своём месте,
+//      present  (🟨) — буква есть в слове, но не на этом месте,
+//      absent   (⬛) — буквы нет.
+//  • Ежедневная головоломка детерминирована: сид = дата (UTC) → слово из списка.
 // ───────────────────────────────────────────────────────────────────────────
 
-export const SIZE = 5;
-export const CELLS = SIZE * SIZE; // 25
+import { WORDS, WORD_SET } from "./words";
+
+export const WORD_LEN = 5;
+export const MAX_GUESSES = 6;
+
+// «Нулевой день» для нумерации головоломок (Word #N).
+const EPOCH_KEY = "2025-01-01";
+
+export type LetterState = "correct" | "present" | "absent";
 
 /**
  * Детерминированный ГПСЧ mulberry32: из одного числа-сида даёт
- * воспроизводимую последовательность чисел в диапазоне [0, 1).
- * Один и тот же сид → одна и та же доска у всех игроков.
+ * воспроизводимую последовательность чисел [0,1). Один сид → одно слово у всех.
  */
 export function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
@@ -29,12 +34,12 @@ export function mulberry32(seed: number): () => number {
   };
 }
 
-/** Ключ дня в UTC, например "2026-06-02". Одинаков для всех часовых поясов. */
+/** Ключ дня в UTC, например "2026-06-02". Одинаков во всех часовых поясах. */
 export function utcDateKey(d: Date = new Date()): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Хэш строки (FNV-1a) → 32-битное число-сид для ГПСЧ. */
+/** Хэш строки (FNV-1a) → 32-битный сид для ГПСЧ. */
 export function seedFromKey(key: string): number {
   let h = 2166136261;
   for (let i = 0; i < key.length; i++) {
@@ -44,67 +49,57 @@ export function seedFromKey(key: string): number {
   return h >>> 0;
 }
 
-/** Индексы тайла i и его ортогональных соседей (сам тайл всегда включён). */
-export function neighbors(i: number): number[] {
-  const row = Math.floor(i / SIZE);
-  const col = i % SIZE;
-  const out = [i];
-  if (row > 0) out.push(i - SIZE); // сверху
-  if (row < SIZE - 1) out.push(i + SIZE); // снизу
-  if (col > 0) out.push(i - 1); // слева
-  if (col < SIZE - 1) out.push(i + 1); // справа
-  return out;
+/** Порядковый номер головоломки (дней с EPOCH_KEY, начиная с 1). */
+export function puzzleNumber(dateKey: string): number {
+  const day = Date.parse(`${dateKey}T00:00:00.000Z`);
+  const epoch = Date.parse(`${EPOCH_KEY}T00:00:00.000Z`);
+  return Math.floor((day - epoch) / 86_400_000) + 1;
 }
 
-/** Нажатие по тайлу i: возвращает НОВЫЙ массив (иммутабельно, удобно для React). */
-export function applyPress(board: boolean[], i: number): boolean[] {
-  const next = board.slice();
-  for (const n of neighbors(i)) next[n] = !next[n];
-  return next;
-}
-
-/** Доска решена, когда все тайлы выключены. */
-export function isSolved(board: boolean[]): boolean {
-  return board.every((cell) => !cell);
-}
-
-export interface DailyPuzzle {
+export interface DailyWord {
   dateKey: string; // "2026-06-02"
-  seed: number;
-  board: boolean[]; // стартовая расстановка (length = 25)
-  par: number; // эталонное число ходов (N применённых нажатий)
+  answer: string; // загаданное слово (5 букв)
+  number: number; // Word #N
+}
+
+/** Слово дня по дате (детерминированно). */
+export function getDailyWord(dateKey: string = utcDateKey()): DailyWord {
+  const rng = mulberry32(seedFromKey(dateKey));
+  const answer = WORDS[Math.floor(rng() * WORDS.length)];
+  return { dateKey, answer, number: puzzleNumber(dateKey) };
+}
+
+/** Есть ли слово в словаре (для проверки догадки игрока). */
+export function isValidWord(word: string): boolean {
+  return WORD_SET.has(word.toLowerCase());
 }
 
 /**
- * Строит решаемую головоломку дня.
- * Идём от решённого поля «всё выкл» и применяем N различных валидных нажатий.
- * Поскольку нажатие — само себе обратное и порядок не важен, ровно эти же
- * N нажатий и есть решение → par = N.
+ * Оценка догадки относительно ответа с правильной обработкой повторов:
+ *  1) сначала помечаем точные совпадения (correct) и «расходуем» эти буквы ответа;
+ *  2) затем для остальных ищем букву среди ещё не израсходованных (present).
  */
-export function generateDaily(dateKey: string = utcDateKey()): DailyPuzzle {
-  const seed = seedFromKey(dateKey);
-  const rng = mulberry32(seed);
+export function scoreGuess(guess: string, answer: string): LetterState[] {
+  const g = guess.toLowerCase();
+  const a = answer.toLowerCase();
+  const result: LetterState[] = new Array(WORD_LEN).fill("absent");
+  const remaining: (string | null)[] = a.split("");
 
-  const par = 6 + Math.floor(rng() * 5); // 6..10 включительно
-
-  let board: boolean[] = new Array(CELLS).fill(false);
-  const used = new Set<number>();
-
-  // Применяем par РАЗЛИЧНЫХ нажатий (без повторов, чтобы они не гасили друг друга).
-  let guard = 0;
-  while (used.size < par && guard < 1000) {
-    guard++;
-    const idx = Math.floor(rng() * CELLS);
-    if (used.has(idx)) continue;
-    used.add(idx);
-    board = applyPress(board, idx);
+  // Проход 1 — точные попадания.
+  for (let i = 0; i < WORD_LEN; i++) {
+    if (g[i] === remaining[i]) {
+      result[i] = "correct";
+      remaining[i] = null;
+    }
   }
-
-  // Подстраховка: крайне маловероятно, но если доска вышла уже решённой —
-  // делаем ещё одно нажатие, чтобы дать игроку реальную задачу.
-  if (isSolved(board)) {
-    board = applyPress(board, 12);
+  // Проход 2 — буква есть, но не на месте.
+  for (let i = 0; i < WORD_LEN; i++) {
+    if (result[i] === "correct") continue;
+    const idx = remaining.indexOf(g[i]);
+    if (idx !== -1) {
+      result[i] = "present";
+      remaining[idx] = null;
+    }
   }
-
-  return { dateKey, seed, board, par };
+  return result;
 }
