@@ -230,8 +230,8 @@ export class ArenaGame {
     this.px = Math.min(Math.max(this.px, PLAYER_R), this.w - PLAYER_R);
     this.py = Math.min(Math.max(this.py, PLAYER_R), this.h - PLAYER_R);
 
-    // Спавн врагов
-    const spawnEvery = Math.max(0.35, 1.15 - this.wave * 0.08);
+    // Спавн врагов — мягкий старт (волна 1 ~1.3с), затем заметное ускорение.
+    const spawnEvery = Math.max(0.4, 1.4 - this.wave * 0.12);
     this.spawnTimer += dt;
     if (this.spawnTimer >= spawnEvery) {
       this.spawnTimer = 0;
@@ -375,13 +375,15 @@ export class ArenaGame {
       x = -20;
       y = Math.random() * this.h;
     }
-    // Выбор типа врага в зависимости от волны.
+    // Выбор типа врага по волне. Волна 1 — только грунты (учебка),
+    // быстрые дротики появляются со 2-й, бронированные танки — с 4-й.
     const roll = Math.random();
     let type: EnemyType = "grunt";
-    if (this.wave >= 3 && roll < 0.22) type = "tank";
-    else if (this.wave >= 2 && roll < 0.45) type = "dart";
+    if (this.wave >= 4 && roll < 0.22) type = "tank";
+    else if (this.wave >= 2 && roll < 0.18 + this.wave * 0.04) type = "dart";
 
-    const base = Math.min(55 + this.wave * 9, 200);
+    // Скорость растёт плавнее и стартует ниже, чтобы освоить прицел.
+    const base = Math.min(48 + this.wave * 8, 190);
     let r = 13;
     let speed = base;
     let hp = 1;
