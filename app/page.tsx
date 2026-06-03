@@ -43,6 +43,8 @@ export default function Home() {
   const [streak, setStreak] = useState(0);
   const [playedToday, setPlayedToday] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const mutedRef = useRef(false);
 
   // Загрузка статов при старте.
   useEffect(() => {
@@ -65,6 +67,7 @@ export default function Home() {
         setPhase("over");
       },
     });
+    game.setMuted(mutedRef.current);
     gameRef.current = game;
     setPhase("menu");
     return () => {
@@ -79,6 +82,15 @@ export default function Home() {
     setScore(0);
     setWave(1);
     setPhase("playing");
+  }
+
+  function toggleMute() {
+    setMuted((m) => {
+      const next = !m;
+      mutedRef.current = next;
+      gameRef.current?.setMuted(next);
+      return next;
+    });
   }
 
   // Дневной чек-ин из «Арсенала».
@@ -188,10 +200,20 @@ export default function Home() {
               <span className="font-semibold uppercase tracking-wider text-emerald-300">
                 ● Arena ready
               </span>
-              <span className="font-semibold text-slate-400">
-                Best <span className="text-slate-100">{best}</span> · 🔥{" "}
-                <span className="text-slate-100">{streak}</span>
-              </span>
+              <div className="flex items-center gap-3">
+                <span className="font-semibold text-slate-400">
+                  Best <span className="text-slate-100">{best}</span> · 🔥{" "}
+                  <span className="text-slate-100">{streak}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={toggleMute}
+                  aria-label={muted ? "Unmute" : "Mute"}
+                  className="rounded-full px-1.5 text-base leading-none text-slate-400 transition hover:text-slate-100"
+                >
+                  {muted ? "🔇" : "🔊"}
+                </button>
+              </div>
             </div>
 
             <div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl ring-1 ring-emerald-500/30 shadow-[0_0_40px_-10px] shadow-emerald-500/40">

@@ -15,7 +15,7 @@ export interface ArenaCallbacks {
   onGameOver: (score: number, wave: number) => void;
 }
 
-type EnemyType = "grunt" | "tank" | "dart";
+type EnemyType = "grunt" | "tank" | "dart" | "splitter";
 
 interface Enemy {
   x: number;
@@ -25,6 +25,16 @@ interface Enemy {
   hp: number;
   type: EnemyType;
   spin: number; // текущий угол для вращения формы
+}
+
+// Подбираемые усиления, выпадающие с убитых врагов.
+type PowerKind = "heal" | "rapid" | "triple";
+
+interface Powerup {
+  x: number;
+  y: number;
+  kind: PowerKind;
+  life: number; // оставшееся время до исчезновения (сек)
 }
 
 interface Bullet {
@@ -73,6 +83,14 @@ const CONTACT_DMG = 18;
 const IFRAME = 0.7; // неуязвимость после удара (сек)
 const STICK_MAX = 55; // радиус тач-стика (px)
 const STICK_DEAD = 6; // мёртвая зона стика (px)
+const COMBO_WINDOW = 2.2; // сек на продолжение серии убийств
+const COMBO_MAX_MULT = 8; // потолок множителя
+const RAPID_TIME = 6; // длительность скорострельности (сек)
+const TRIPLE_TIME = 8; // длительность тройного выстрела (сек)
+const POWERUP_TTL = 8; // сколько живёт дроп на поле (сек)
+const POWERUP_R = 11;
+const POWERUP_CHANCE = 0.12; // шанс дропа с убитого врага
+const HEAL_AMOUNT = 25;
 
 export class ArenaGame {
   private canvas: HTMLCanvasElement;
@@ -102,6 +120,19 @@ export class ArenaGame {
   private spawnTimer = 0;
   private invuln = 0;
   private aim = -Math.PI / 2; // направление носа корабля
+
+  // Сок: комбо, тряска, дропы, активные усиления
+  private combo = 0;
+  private comboTimer = 0;
+  private mult = 1;
+  private shake = 0; // текущая амплитуда тряски (px)
+  private powerups: Powerup[] = [];
+  private rapidTimer = 0;
+  private tripleTimer = 0;
+
+  // Звук (WebAudio): создаётся по жесту пользователя в start().
+  private audio?: AudioContext;
+  private muted = false;
 
   // Ввод
   private keys = new Set<string>();
@@ -158,6 +189,13 @@ export class ArenaGame {
     this.fireTimer = 0;
     this.spawnTimer = 0;
     this.invuln = 0;
+    this.combo = 0;
+    this.comboTimer = 0;
+    this.mult = 1;
+    this.shake = 0;
+    this.powerups = [];
+    this.rapidTimer = 0;
+    this.tripleTimer = 0;
     this.moveStick.active = false;
     this.moveStick.id = -1;
     this.aimStick.active = false;
@@ -168,9 +206,22 @@ export class ArenaGame {
 
   start(): void {
     if (this.running) return;
+    // AudioContext можно создавать только из пользовательского жеста (клик Start).
+    if (!this.audio) {
+      const Ctor =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext })
+          .webkitAudioContext;
+      if (Ctor) this.audio = new Ctor();
+    }
+    void this.audio?.resume?.();
     this.running = true;
     this.lastTs = performance.now();
     this.raf = requestAnimationFrame((t) => this.loop(t));
+  }
+
+  setMuted(muted: boolean): void {
+    this.muted = muted;
   }
 
   stop(): void {
@@ -222,6 +273,16 @@ export class ArenaGame {
     this.elapsed += dt;
     this.wave = 1 + Math.floor(this.elapsed / 12);
     if (this.invuln > 0) this.invuln -= dt;
+    if (this.rapidTimer > 0) this.rapidTimer -= dt;
+    if (this.tripleTimer > 0) this.tripleTimer -= dt;
+    if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 18);
+    if (this.comboTimer > 0) {
+      this.comboTimer -= dt;
+      if (this.comboTimer <= 0) {
+        this.combo = 0;
+        this.mult = 1;
+      }
+    }
 
     // Движение игрока
     const dir = this.moveDir();
@@ -255,19 +316,16 @@ export class ArenaGame {
       this.aim = Math.atan2(dir.y, dir.x);
     }
 
+    const interval = this.rapidTimer > 0 ? FIRE_INTERVAL * 0.5 : FIRE_INTERVAL;
     this.fireTimer += dt;
     if (firing) {
-      if (this.fireTimer >= FIRE_INTERVAL) {
+      if (this.fireTimer >= interval) {
         this.fireTimer = 0;
-        this.bullets.push({
-          x: this.px + Math.cos(this.aim) * PLAYER_R,
-          y: this.py + Math.sin(this.aim) * PLAYER_R,
-          vx: Math.cos(this.aim) * BULLET_SPEED,
-          vy: Math.sin(this.aim) * BULLET_SPEED,
-        });
+        this.shoot();
+        this.sfx("shoot");
       }
     } else {
-      this.fireTimer = FIRE_INTERVAL; // готов выстрелить мгновенно при нажатии
+      this.fireTimer = interval; // готов выстрелить мгновенно при нажатии
     }
 
     // Пули
@@ -295,16 +353,28 @@ export class ArenaGame {
         if (dx * dx + dy * dy <= (e.r + BULLET_R) * (e.r + BULLET_R)) {
           e.hp -= 1;
           b.x = -9999; // помечаем пулю на удаление
-          if (e.hp <= 0) {
-            this.score += 10 + this.wave;
-            this.burst(e.x, e.y, "52,211,153");
-          }
           break;
         }
       }
     }
     this.bullets = this.bullets.filter((b) => b.x > -9000);
+    // Убитые пулями дают очки/комбо/дроп (контактные смерти ниже — без награды).
+    for (const e of this.enemies) {
+      if (e.hp <= 0) this.onEnemyKilled(e);
+    }
     this.enemies = this.enemies.filter((e) => e.hp > 0);
+
+    // Подбор пауэр-апов + истечение срока
+    for (const p of this.powerups) {
+      p.life -= dt;
+      const dx = p.x - this.px;
+      const dy = p.y - this.py;
+      if (dx * dx + dy * dy <= (POWERUP_R + PLAYER_R) * (POWERUP_R + PLAYER_R)) {
+        this.applyPower(p.kind);
+        p.life = -1;
+      }
+    }
+    this.powerups = this.powerups.filter((p) => p.life > 0);
 
     // Столкновения враг↔игрок
     for (const e of this.enemies) {
@@ -315,6 +385,11 @@ export class ArenaGame {
           this.health -= CONTACT_DMG;
           this.invuln = IFRAME;
           this.burst(this.px, this.py, "248,113,113");
+          this.shake = 9;
+          this.combo = 0; // удар сбивает серию
+          this.mult = 1;
+          this.comboTimer = 0;
+          this.sfx("hit");
         }
         e.hp = 0; // враг гибнет при контакте
       }
@@ -376,11 +451,12 @@ export class ArenaGame {
       y = Math.random() * this.h;
     }
     // Выбор типа врага по волне. Волна 1 — только грунты (учебка),
-    // быстрые дротики появляются со 2-й, бронированные танки — с 4-й.
+    // дротики со 2-й, делящиеся сплиттеры с 3-й, бронированные танки — с 4-й.
     const roll = Math.random();
     let type: EnemyType = "grunt";
-    if (this.wave >= 4 && roll < 0.22) type = "tank";
-    else if (this.wave >= 2 && roll < 0.18 + this.wave * 0.04) type = "dart";
+    if (this.wave >= 4 && roll < 0.18) type = "tank";
+    else if (this.wave >= 3 && roll < 0.32) type = "splitter";
+    else if (this.wave >= 2 && roll < 0.28) type = "dart";
 
     // Скорость растёт плавнее и стартует ниже, чтобы освоить прицел.
     const base = Math.min(48 + this.wave * 8, 190);
@@ -395,6 +471,10 @@ export class ArenaGame {
       r = 10;
       speed = base * 1.45;
       hp = 1;
+    } else if (type === "splitter") {
+      r = 16;
+      speed = base * 0.85;
+      hp = 2;
     }
     this.enemies.push({
       x,
@@ -424,6 +504,107 @@ export class ArenaGame {
     }
   }
 
+  /** Выстрел из носа корабля; с тройным усилением — веер из трёх пуль. */
+  private shoot(): void {
+    const spread = this.tripleTimer > 0 ? [-0.18, 0, 0.18] : [0];
+    for (const off of spread) {
+      const a = this.aim + off;
+      this.bullets.push({
+        x: this.px + Math.cos(a) * PLAYER_R,
+        y: this.py + Math.sin(a) * PLAYER_R,
+        vx: Math.cos(a) * BULLET_SPEED,
+        vy: Math.sin(a) * BULLET_SPEED,
+      });
+    }
+  }
+
+  /** Враг убит пулей: серия, множитель, очки, частицы, дроп, дробление. */
+  private onEnemyKilled(e: Enemy): void {
+    this.combo += 1;
+    this.comboTimer = COMBO_WINDOW;
+    this.mult = Math.min(1 + Math.floor(this.combo / 4), COMBO_MAX_MULT);
+    this.score += (10 + this.wave) * this.mult;
+    this.burst(e.x, e.y, "52,211,153");
+    this.shake = Math.min(this.shake + 3, 9);
+    this.sfx("kill");
+
+    // Сплиттер распадается на два быстрых осколка.
+    if (e.type === "splitter") {
+      for (let i = 0; i < 2; i++) {
+        const a = Math.random() * Math.PI * 2;
+        this.enemies.push({
+          x: e.x + Math.cos(a) * 6,
+          y: e.y + Math.sin(a) * 6,
+          r: 9,
+          speed: 150 + Math.random() * 40,
+          hp: 1,
+          type: "dart",
+          spin: Math.random() * Math.PI,
+        });
+      }
+    }
+
+    // Шанс выронить пауэр-ап.
+    if (Math.random() < POWERUP_CHANCE) {
+      const kinds: PowerKind[] = ["heal", "rapid", "triple"];
+      const kind = kinds[Math.floor(Math.random() * kinds.length)];
+      this.powerups.push({ x: e.x, y: e.y, kind, life: POWERUP_TTL });
+    }
+  }
+
+  private applyPower(kind: PowerKind): void {
+    if (kind === "heal")
+      this.health = Math.min(MAX_HEALTH, this.health + HEAL_AMOUNT);
+    else if (kind === "rapid") this.rapidTimer = RAPID_TIME;
+    else if (kind === "triple") this.tripleTimer = TRIPLE_TIME;
+    this.shake = Math.min(this.shake + 2, 9);
+    this.sfx("power");
+  }
+
+  /** Короткие синтезированные звуки через WebAudio (ассеты не нужны). */
+  private sfx(kind: "shoot" | "kill" | "hit" | "power"): void {
+    const ac = this.audio;
+    if (this.muted || !ac) return;
+    const t = ac.currentTime;
+    const o = ac.createOscillator();
+    const g = ac.createGain();
+    o.connect(g);
+    g.connect(ac.destination);
+
+    let freq = 440;
+    let dur = 0.08;
+    let vol = 0.04;
+    o.type = "square";
+    if (kind === "shoot") {
+      freq = 660;
+      dur = 0.05;
+      vol = 0.02;
+    } else if (kind === "kill") {
+      freq = 320;
+      dur = 0.1;
+      vol = 0.05;
+      o.type = "triangle";
+      o.frequency.exponentialRampToValueAtTime(freq * 1.6, t + dur);
+    } else if (kind === "hit") {
+      freq = 130;
+      dur = 0.18;
+      vol = 0.07;
+      o.type = "sawtooth";
+      o.frequency.exponentialRampToValueAtTime(45, t + dur);
+    } else if (kind === "power") {
+      freq = 740;
+      dur = 0.16;
+      vol = 0.06;
+      o.type = "sine";
+      o.frequency.exponentialRampToValueAtTime(freq * 1.5, t + dur);
+    }
+    o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.start(t);
+    o.stop(t + dur + 0.02);
+  }
+
   // ── Отрисовка ─────────────────────────────────────────────────────────────
 
   private render(): void {
@@ -434,6 +615,18 @@ export class ArenaGame {
     ctx.fillStyle = "#05080f";
     ctx.fillRect(0, 0, this.w, this.h);
     this.drawGrid();
+
+    // Тряску применяем к игровому миру, но не к фону/сетке/HUD.
+    ctx.save();
+    if (this.shake > 0) {
+      ctx.translate(
+        (Math.random() * 2 - 1) * this.shake,
+        (Math.random() * 2 - 1) * this.shake,
+      );
+    }
+
+    // пауэр-апы (под частицами/врагами)
+    this.drawPowerups();
 
     // частицы
     for (const p of this.particles) {
@@ -476,6 +669,10 @@ export class ArenaGame {
       } else if (e.type === "dart") {
         ctx.shadowColor = "rgba(245,158,11,0.9)";
         this.drawPolygon(e.x, e.y, e.r, 4, angleToPlayer, "#f59e0b");
+      } else if (e.type === "splitter") {
+        // splitter — пятиугольник, делится на осколки при гибели
+        ctx.shadowColor = "rgba(45,212,191,0.9)";
+        this.drawPolygon(e.x, e.y, e.r, 5, e.spin, "#2dd4bf");
       } else {
         // tank — шестиугольник, медленно крутится, обводка показывает «броню»
         ctx.shadowColor = "rgba(168,85,247,0.9)";
@@ -487,6 +684,8 @@ export class ArenaGame {
     const blink = this.invuln > 0 && Math.floor(this.invuln * 20) % 2 === 0;
     if (!blink) this.drawShip();
     ctx.shadowBlur = 0;
+
+    ctx.restore(); // конец тряски игрового мира
 
     // Тач-стики: левый (движение) серый, правый (прицел/огонь) циан.
     this.drawStick(this.moveStick, "148,163,184");
@@ -548,6 +747,36 @@ export class ArenaGame {
     ctx.fill();
   }
 
+  /** Дропы: светящийся ромб с буквой типа (H/R/3); мигает к концу жизни. */
+  private drawPowerups(): void {
+    const ctx = this.ctx;
+    const palette: Record<PowerKind, [string, string]> = {
+      heal: ["#34d399", "H"],
+      rapid: ["#22d3ee", "R"],
+      triple: ["#f59e0b", "3"],
+    };
+    for (const p of this.powerups) {
+      // мигание в последние 2с
+      if (p.life < 2 && Math.floor(p.life * 8) % 2 === 0) continue;
+      const [color, letter] = palette[p.kind];
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(Math.PI / 4);
+      ctx.shadowBlur = 14;
+      ctx.shadowColor = color;
+      ctx.fillStyle = color;
+      ctx.fillRect(-POWERUP_R * 0.7, -POWERUP_R * 0.7, POWERUP_R * 1.4, POWERUP_R * 1.4);
+      ctx.restore();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = "#05080f";
+      ctx.font = "700 12px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(letter, p.x, p.y + 1);
+      ctx.textBaseline = "alphabetic";
+    }
+  }
+
   private drawHud(): void {
     const ctx = this.ctx;
     // счёт
@@ -559,11 +788,38 @@ export class ArenaGame {
     ctx.fillStyle = "#64748b";
     ctx.fillText("SCORE", this.w / 2, 48);
 
+    // множитель серии (показываем только когда >1)
+    if (this.mult > 1) {
+      ctx.fillStyle = "#f59e0b";
+      ctx.font = "800 16px system-ui, sans-serif";
+      ctx.fillText(`×${this.mult}`, this.w / 2, 66);
+    }
+
     // волна
     ctx.textAlign = "right";
     ctx.fillStyle = "#a78bfa";
     ctx.font = "700 14px system-ui, sans-serif";
     ctx.fillText(`WAVE ${this.wave}`, this.w - 12, 26);
+
+    // активные баффы (под волной)
+    const buffs: Array<[string, string, number, number]> = [];
+    if (this.rapidTimer > 0)
+      buffs.push(["RAPID", "#22d3ee", this.rapidTimer, RAPID_TIME]);
+    if (this.tripleTimer > 0)
+      buffs.push(["TRIPLE", "#f59e0b", this.tripleTimer, TRIPLE_TIME]);
+    let by = 40;
+    ctx.font = "700 10px system-ui, sans-serif";
+    for (const [label, color, left, full] of buffs) {
+      ctx.fillStyle = color;
+      ctx.fillText(label, this.w - 12, by);
+      // тонкий таймер-бар под лейблом
+      const bw = 46;
+      ctx.fillStyle = "rgba(148,163,184,0.25)";
+      ctx.fillRect(this.w - 12 - bw, by + 3, bw, 3);
+      ctx.fillStyle = color;
+      ctx.fillRect(this.w - 12 - bw, by + 3, bw * (left / full), 3);
+      by += 16;
+    }
 
     // здоровье
     const barW = 120;
