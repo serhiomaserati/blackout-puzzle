@@ -1,8 +1,8 @@
 // ───────────────────────────────────────────────────────────────────────────
 // Движок игры «Neon Arena» — top-down шутер-выживалка на canvas.
 //
-//  • Игрок двигается джойстиком (тач/мышь) или WASD/стрелками.
-//  • Оружие стреляет АВТОМАТИЧЕСКИ по ближайшему врагу (одной рукой на телефоне).
+//  • Движение: WASD/стрелки или левый тач-стик.
+//  • Прицел и огонь: мышь + зажатая ЛКМ (десктоп) или правый тач-стик (телефон).
 //  • Враги волнами идут к игроку; пули их убивают, контакт — урон игроку.
 //  • Сложность растёт со временем (скорость врагов и частота спавна).
 //  • При здоровье 0 — game over, вызывается колбэк onGameOver(score, wave).
@@ -44,6 +44,25 @@ interface Particle {
   hue: string;
 }
 
+// Плавающий тач-стик: origin (ox,oy) — точка касания, knob (kx,ky) — текущий палец.
+interface Stick {
+  id: number; // pointerId владеющего пальца (-1 = свободен)
+  ox: number;
+  oy: number;
+  kx: number;
+  ky: number;
+  active: boolean;
+}
+
+const newStick = (): Stick => ({
+  id: -1,
+  ox: 0,
+  oy: 0,
+  kx: 0,
+  ky: 0,
+  active: false,
+});
+
 const PLAYER_R = 14;
 const PLAYER_SPEED = 235; // px/сек
 const BULLET_R = 4;
@@ -52,6 +71,8 @@ const FIRE_INTERVAL = 0.24; // сек между выстрелами
 const MAX_HEALTH = 100;
 const CONTACT_DMG = 18;
 const IFRAME = 0.7; // неуязвимость после удара (сек)
+const STICK_MAX = 55; // радиус тач-стика (px)
+const STICK_DEAD = 6; // мёртвая зона стика (px)
 
 export class ArenaGame {
   private canvas: HTMLCanvasElement;
@@ -84,11 +105,16 @@ export class ArenaGame {
 
   // Ввод
   private keys = new Set<string>();
-  private joyActive = false;
-  private joyOX = 0; // origin
-  private joyOY = 0;
-  private joyKX = 0; // knob
-  private joyKY = 0;
+
+  // Десктоп: мышь целится, зажатая ЛКМ — огонь.
+  private hasMouse = false;
+  private mouseX = 0;
+  private mouseY = 0;
+  private mouseFiring = false;
+
+  // Тач: левая половина экрана двигает, правая целится и стреляет.
+  private moveStick: Stick = newStick();
+  private aimStick: Stick = newStick();
 
   private resizeObs?: ResizeObserver;
 
@@ -132,7 +158,11 @@ export class ArenaGame {
     this.fireTimer = 0;
     this.spawnTimer = 0;
     this.invuln = 0;
-    this.joyActive = false;
+    this.moveStick.active = false;
+    this.moveStick.id = -1;
+    this.aimStick.active = false;
+    this.aimStick.id = -1;
+    this.mouseFiring = false;
     this.render();
   }
 
@@ -208,20 +238,36 @@ export class ArenaGame {
       this.spawnEnemy();
     }
 
-    // Авто-огонь по ближайшему врагу
+    // Прицел и ручной огонь.
+    //  • Тач: правый стик задаёт направление носа и ведёт непрерывный огонь.
+    //  • Десктоп: нос смотрит на мышь, стреляем пока зажата ЛКМ.
+    //  • Иначе нос смотрит по направлению движения (огня нет).
+    let firing = false;
+    if (this.aimStick.active) {
+      const ax = this.aimStick.kx - this.aimStick.ox;
+      const ay = this.aimStick.ky - this.aimStick.oy;
+      if (Math.hypot(ax, ay) > STICK_DEAD) this.aim = Math.atan2(ay, ax);
+      firing = true;
+    } else if (this.hasMouse) {
+      this.aim = Math.atan2(this.mouseY - this.py, this.mouseX - this.px);
+      firing = this.mouseFiring;
+    } else if (dir.x !== 0 || dir.y !== 0) {
+      this.aim = Math.atan2(dir.y, dir.x);
+    }
+
     this.fireTimer += dt;
-    if (this.fireTimer >= FIRE_INTERVAL && this.enemies.length > 0) {
-      this.fireTimer = 0;
-      const target = this.nearestEnemy();
-      if (target) {
-        const a = Math.atan2(target.y - this.py, target.x - this.px);
+    if (firing) {
+      if (this.fireTimer >= FIRE_INTERVAL) {
+        this.fireTimer = 0;
         this.bullets.push({
-          x: this.px,
-          y: this.py,
-          vx: Math.cos(a) * BULLET_SPEED,
-          vy: Math.sin(a) * BULLET_SPEED,
+          x: this.px + Math.cos(this.aim) * PLAYER_R,
+          y: this.py + Math.sin(this.aim) * PLAYER_R,
+          vx: Math.cos(this.aim) * BULLET_SPEED,
+          vy: Math.sin(this.aim) * BULLET_SPEED,
         });
       }
+    } else {
+      this.fireTimer = FIRE_INTERVAL; // готов выстрелить мгновенно при нажатии
     }
 
     // Пули
@@ -239,14 +285,6 @@ export class ArenaGame {
       e.x += Math.cos(a) * e.speed * dt;
       e.y += Math.sin(a) * e.speed * dt;
       e.spin += dt * (e.type === "tank" ? 0.8 : 2.2);
-    }
-
-    // Нос корабля смотрит на ближайшего врага (или по направлению движения).
-    const aimTarget = this.nearestEnemy();
-    if (aimTarget) {
-      this.aim = Math.atan2(aimTarget.y - this.py, aimTarget.x - this.px);
-    } else if (dir.x !== 0 || dir.y !== 0) {
-      this.aim = Math.atan2(dir.y, dir.x);
     }
 
     // Столкновения пуля↔враг
@@ -306,31 +344,17 @@ export class ArenaGame {
       const m = Math.hypot(x, y);
       return { x: x / m, y: y / m };
     }
-    // Джойстик (тач/мышь)
-    if (this.joyActive) {
-      const dx = this.joyKX - this.joyOX;
-      const dy = this.joyKY - this.joyOY;
+    // Левый тач-стик
+    if (this.moveStick.active) {
+      const dx = this.moveStick.kx - this.moveStick.ox;
+      const dy = this.moveStick.ky - this.moveStick.oy;
       const dist = Math.hypot(dx, dy);
-      const maxR = 55;
-      if (dist > 6) {
-        const mag = Math.min(dist, maxR) / maxR;
+      if (dist > STICK_DEAD) {
+        const mag = Math.min(dist, STICK_MAX) / STICK_MAX;
         return { x: (dx / dist) * mag, y: (dy / dist) * mag };
       }
     }
     return { x: 0, y: 0 };
-  }
-
-  private nearestEnemy(): Enemy | null {
-    let best: Enemy | null = null;
-    let bestD = Infinity;
-    for (const e of this.enemies) {
-      const d = (e.x - this.px) ** 2 + (e.y - this.py) ** 2;
-      if (d < bestD) {
-        bestD = d;
-        best = e;
-      }
-    }
-    return best;
   }
 
   private spawnEnemy(): void {
@@ -462,27 +486,25 @@ export class ArenaGame {
     if (!blink) this.drawShip();
     ctx.shadowBlur = 0;
 
-    // джойстик
-    if (this.joyActive) {
-      ctx.strokeStyle = "rgba(148,163,184,0.4)";
-      ctx.lineWidth = 2;
+    // Тач-стики: левый (движение) серый, правый (прицел/огонь) циан.
+    this.drawStick(this.moveStick, "148,163,184");
+    this.drawStick(this.aimStick, "34,211,238");
+
+    // Десктоп: ретикль-перекрестие у курсора (когда не используется тач-стик).
+    if (this.hasMouse && !this.aimStick.active) {
+      ctx.strokeStyle = "rgba(34,211,238,0.55)";
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.arc(this.joyOX, this.joyOY, 55, 0, Math.PI * 2);
+      ctx.arc(this.mouseX, this.mouseY, 9, 0, Math.PI * 2);
+      ctx.moveTo(this.mouseX - 15, this.mouseY);
+      ctx.lineTo(this.mouseX - 5, this.mouseY);
+      ctx.moveTo(this.mouseX + 5, this.mouseY);
+      ctx.lineTo(this.mouseX + 15, this.mouseY);
+      ctx.moveTo(this.mouseX, this.mouseY - 15);
+      ctx.lineTo(this.mouseX, this.mouseY - 5);
+      ctx.moveTo(this.mouseX, this.mouseY + 5);
+      ctx.lineTo(this.mouseX, this.mouseY + 15);
       ctx.stroke();
-      ctx.fillStyle = "rgba(148,163,184,0.5)";
-      const dx = this.joyKX - this.joyOX;
-      const dy = this.joyKY - this.joyOY;
-      const dist = Math.hypot(dx, dy) || 1;
-      const cl = Math.min(dist, 55);
-      ctx.beginPath();
-      ctx.arc(
-        this.joyOX + (dx / dist) * cl,
-        this.joyOY + (dy / dist) * cl,
-        22,
-        0,
-        Math.PI * 2,
-      );
-      ctx.fill();
     }
 
     this.drawHud();
@@ -503,6 +525,25 @@ export class ArenaGame {
       ctx.lineTo(this.w, y);
     }
     ctx.stroke();
+  }
+
+  /** Плавающий тач-стик: кольцо-основание + подвижный «грибок». */
+  private drawStick(s: Stick, rgb: string): void {
+    if (!s.active) return;
+    const ctx = this.ctx;
+    ctx.strokeStyle = `rgba(${rgb},0.35)`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(s.ox, s.oy, STICK_MAX, 0, Math.PI * 2);
+    ctx.stroke();
+    const dx = s.kx - s.ox;
+    const dy = s.ky - s.oy;
+    const dist = Math.hypot(dx, dy) || 1;
+    const cl = Math.min(dist, STICK_MAX);
+    ctx.fillStyle = `rgba(${rgb},0.5)`;
+    ctx.beginPath();
+    ctx.arc(s.ox + (dx / dist) * cl, s.oy + (dy / dist) * cl, 22, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   private drawHud(): void {
@@ -604,24 +645,55 @@ export class ArenaGame {
     e.preventDefault();
     this.canvas.setPointerCapture(e.pointerId);
     const p = this.pointerPos(e);
-    this.joyActive = true;
-    this.joyOX = p.x;
-    this.joyOY = p.y;
-    this.joyKX = p.x;
-    this.joyKY = p.y;
+
+    if (e.pointerType === "mouse") {
+      this.hasMouse = true;
+      this.mouseX = p.x;
+      this.mouseY = p.y;
+      if (e.button === 0) this.mouseFiring = true;
+      return;
+    }
+
+    // Тач/перо: левая половина — стик движения, правая — стик прицела+огня.
+    const stick = p.x < this.w / 2 ? this.moveStick : this.aimStick;
+    if (stick.active) return; // этот стик уже держит другой палец
+    stick.id = e.pointerId;
+    stick.ox = stick.kx = p.x;
+    stick.oy = stick.ky = p.y;
+    stick.active = true;
   };
   private onPointerMove = (e: PointerEvent) => {
-    if (!this.joyActive) return;
     const p = this.pointerPos(e);
-    this.joyKX = p.x;
-    this.joyKY = p.y;
+    if (e.pointerType === "mouse") {
+      this.hasMouse = true;
+      this.mouseX = p.x;
+      this.mouseY = p.y;
+      return;
+    }
+    if (this.moveStick.active && e.pointerId === this.moveStick.id) {
+      this.moveStick.kx = p.x;
+      this.moveStick.ky = p.y;
+    } else if (this.aimStick.active && e.pointerId === this.aimStick.id) {
+      this.aimStick.kx = p.x;
+      this.aimStick.ky = p.y;
+    }
   };
   private onPointerUp = (e: PointerEvent) => {
-    this.joyActive = false;
     try {
       this.canvas.releasePointerCapture(e.pointerId);
     } catch {
       /* noop */
+    }
+    if (e.pointerType === "mouse") {
+      this.mouseFiring = false;
+      return;
+    }
+    if (e.pointerId === this.moveStick.id) {
+      this.moveStick.active = false;
+      this.moveStick.id = -1;
+    } else if (e.pointerId === this.aimStick.id) {
+      this.aimStick.active = false;
+      this.aimStick.id = -1;
     }
   };
 

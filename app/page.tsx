@@ -205,12 +205,12 @@ export default function Home() {
                   <h2 className="font-display text-2xl font-black uppercase tracking-widest text-slate-50">
                     {APP_NAME}
                   </h2>
-                  <p className="max-w-[15rem] text-center text-sm text-slate-400">
-                    Drag anywhere to move. Your blaster auto-fires. Survive the
+                  <p className="max-w-[16rem] text-center text-sm text-slate-400">
+                    Left thumb moves, right thumb aims & fires. Survive the
                     waves.
                   </p>
                   <p className="text-center text-[11px] text-slate-500">
-                    Desktop: WASD / arrows
+                    Desktop: WASD to move · mouse to aim · hold to fire
                   </p>
                   <PrimaryButton onClick={startGame}>Start</PrimaryButton>
                 </Overlay>
