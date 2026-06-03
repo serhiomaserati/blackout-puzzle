@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, Source_Code_Pro } from "next/font/google";
+import { Inter, Source_Code_Pro, Orbitron } from "next/font/google";
 import { SafeArea } from "@coinbase/onchainkit/minikit";
 import { minikitConfig } from "@/minikit.config";
 import { RootProvider } from "./rootProvider";
@@ -53,6 +53,13 @@ const sourceCodePro = Source_Code_Pro({
   subsets: ["latin"],
 });
 
+// Игровой «аркадный» шрифт для заголовков/брендинга.
+const orbitron = Orbitron({
+  variable: "--font-orbitron",
+  subsets: ["latin"],
+  weight: ["600", "700", "800", "900"],
+});
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -61,7 +68,9 @@ export default function RootLayout({
   return (
     <RootProvider>
       <html lang="en">
-        <body className={`${inter.variable} ${sourceCodePro.variable}`}>
+        <body
+          className={`${inter.variable} ${sourceCodePro.variable} ${orbitron.variable}`}
+        >
           <SafeArea>{children}</SafeArea>
         </body>
       </html>

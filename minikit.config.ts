@@ -22,10 +22,10 @@ export const minikitConfig = {
   },
   miniapp: {
     version: "1",
-    name: "Word Daily",
-    subtitle: "Guess the daily 5-letter word",
+    name: "Base Blast",
+    subtitle: "Neon arena survival shooter",
     description:
-      "A new 5-letter word every day. You get 6 tries — green means right spot, yellow means right letter wrong spot. Solve it, build your streak, and share your grid.",
+      "Drag to move, auto-fire at the swarm, and survive as long as you can. Each wave hits harder — rack up your score, beat your best, and share it.",
     screenshotUrls: [`${ROOT_URL}/screenshot.png`],
     iconUrl: `${ROOT_URL}/icon.png`,
     splashImageUrl: `${ROOT_URL}/splash.png`,
@@ -33,12 +33,12 @@ export const minikitConfig = {
     homeUrl: ROOT_URL,
     webhookUrl: `${ROOT_URL}/api/webhook`,
     primaryCategory: "games",
-    tags: ["word", "daily", "puzzle", "game", "streak"],
+    tags: ["arcade", "shooter", "survival", "base", "neon"],
     heroImageUrl: `${ROOT_URL}/hero.png`,
-    tagline: "One word a day. Guess in six.",
-    ogTitle: "Word Daily — Guess the 5-letter word",
+    tagline: "Survive the neon swarm.",
+    ogTitle: "Base Blast — survival shooter",
     ogDescription:
-      "Solve today's 5-letter word in six tries and keep your streak.",
+      "Survive the neon swarm, beat your best score, and share it.",
     ogImageUrl: `${ROOT_URL}/hero.png`,
   },
 } as const;

@@ -19,3 +19,17 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* Аркадный шрифт для заголовков/брендинга. */
+.font-display {
+  font-family: var(--font-orbitron), system-ui, sans-serif;
+  letter-spacing: 0.04em;
+}
+
+/* Лёгкая ретро-сетка поверх тёмного фона. */
+.retro-grid {
+  background-image:
+    linear-gradient(rgba(56, 189, 248, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.05) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
