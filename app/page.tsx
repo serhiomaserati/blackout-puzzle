@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useAccount } from "wagmi";
+import { useAccount, useChainId, useSwitchChain } from "wagmi";
 import { useMiniKit, useComposeCast } from "@coinbase/onchainkit/minikit";
 import {
   ConnectWallet,
@@ -10,11 +10,20 @@ import {
   WalletDropdownDisconnect,
 } from "@coinbase/onchainkit/wallet";
 import { Avatar, Name, Address, Identity } from "@coinbase/onchainkit/identity";
-import { ArenaGame } from "@/lib/arena";
+import { ArenaGame, type Run } from "@/lib/arena";
 import { loadProgress, recordWin } from "@/lib/streak";
 import { loadBest, saveBest } from "@/lib/scores";
 import { buildShareText, APP_NAME } from "@/lib/share";
 import { minikitConfig } from "@/minikit.config";
+import {
+  LEADERBOARD_CHAIN_ID,
+  leaderboardEnabled,
+} from "@/lib/leaderboard";
+import {
+  useTopScores,
+  useOnchainBest,
+  useSubmitScore,
+} from "@/lib/useLeaderboard";
 
 type Tab = "game" | "board" | "arsenal";
 type Phase = "menu" | "playing" | "over";
@@ -46,6 +55,20 @@ export default function Home() {
   const [muted, setMuted] = useState(false);
   const mutedRef = useRef(false);
 
+  // Лидерборд (ончейн)
+  const chainId = useChainId();
+  const { switchChainAsync } = useSwitchChain();
+  const lastRunRef = useRef<Run | null>(null);
+  const lbEnabled = leaderboardEnabled();
+  const { top: onchainTop, refetch: refetchTop } = useTopScores();
+  const { best: onchainBest, refetch: refetchBest } = useOnchainBest(address);
+  const {
+    submit,
+    reset: resetSubmit,
+    phase: submitPhase,
+    error: submitError,
+  } = useSubmitScore();
+
   // Загрузка статов при старте.
   useEffect(() => {
     const prog = loadProgress();
@@ -59,6 +82,7 @@ export default function Home() {
     if (tab !== "game" || !canvasRef.current) return;
     const game = new ArenaGame(canvasRef.current, {
       onGameOver: (finalScore, finalWave) => {
+        lastRunRef.current = game.getRun(); // записанный ран для ончейн-проверки
         setBest(saveBest(finalScore));
         setStreak(recordWin(todayKey()).streak); // дневной чек-ин
         setPlayedToday(true);
@@ -77,11 +101,33 @@ export default function Home() {
   }, [tab]);
 
   function startGame() {
+    resetSubmit();
     gameRef.current?.reset();
     gameRef.current?.start();
     setScore(0);
     setWave(1);
     setPhase("playing");
+  }
+
+  // Обновить ончейн-данные после успешной отправки.
+  useEffect(() => {
+    if (submitPhase === "done") {
+      refetchTop();
+      refetchBest();
+    }
+  }, [submitPhase, refetchTop, refetchBest]);
+
+  // Отправить записанный ран в лидерборд (с авто-переключением сети).
+  async function submitToLeaderboard() {
+    if (!lbEnabled || !isConnected || !address || !lastRunRef.current) return;
+    try {
+      if (chainId !== LEADERBOARD_CHAIN_ID) {
+        await switchChainAsync({ chainId: LEADERBOARD_CHAIN_ID });
+      }
+    } catch {
+      return; // отказались переключать сеть
+    }
+    await submit(lastRunRef.current, address);
   }
 
   function toggleMute() {
@@ -258,6 +304,44 @@ export default function Home() {
                       {copied ? "Copied ✓" : "Share"}
                     </GhostButton>
                   </div>
+
+                  {lbEnabled && (
+                    <div className="mt-1 flex flex-col items-center gap-1">
+                      {!isConnected ? (
+                        <p className="text-[11px] text-slate-500">
+                          Connect wallet to post onchain
+                        </p>
+                      ) : submitPhase === "done" ? (
+                        <span className="text-xs font-bold text-emerald-300">
+                          On leaderboard ✓
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={submitToLeaderboard}
+                          disabled={
+                            submitPhase === "verifying" ||
+                            submitPhase === "submitting" ||
+                            submitPhase === "confirming"
+                          }
+                          className="rounded-full bg-slate-800/80 px-5 py-2 text-xs font-bold uppercase tracking-wider text-cyan-300 ring-1 ring-cyan-400/30 transition hover:bg-slate-700/80 disabled:opacity-60"
+                        >
+                          {submitPhase === "verifying"
+                            ? "Verifying…"
+                            : submitPhase === "submitting"
+                              ? "Confirm in wallet…"
+                              : submitPhase === "confirming"
+                                ? "Confirming…"
+                                : "⛓ Submit score onchain"}
+                        </button>
+                      )}
+                      {submitError && (
+                        <p className="max-w-[16rem] text-center text-[11px] text-rose-400">
+                          {submitError}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </Overlay>
               )}
             </div>
@@ -273,29 +357,72 @@ export default function Home() {
                 <span>Player</span>
                 <span className="text-right">Best</span>
               </div>
-              <div className="grid grid-cols-[2rem_1fr_4rem] items-center gap-2 rounded-xl bg-emerald-400/10 px-1 py-2.5 ring-1 ring-emerald-400/20">
-                <span className="text-center font-black text-emerald-300">1</span>
-                <span className="truncate text-sm font-semibold text-slate-100">
-                  {isConnected ? shortAddr(address) : "You"}
-                </span>
-                <span className="text-right font-bold tabular-nums text-slate-50">
-                  {best}
-                </span>
-              </div>
-              {[2, 3, 4].map((r) => (
-                <div
-                  key={r}
-                  className="grid grid-cols-[2rem_1fr_4rem] items-center gap-2 px-1 py-2 text-slate-600"
-                >
-                  <span className="text-center font-bold">{r}</span>
-                  <span className="text-sm">—</span>
-                  <span className="text-right tabular-nums">—</span>
-                </div>
-              ))}
+
+              {lbEnabled && onchainTop.length > 0 ? (
+                onchainTop.map((e, i) => {
+                  const you =
+                    !!address &&
+                    e.player.toLowerCase() === address.toLowerCase();
+                  return (
+                    <div
+                      key={e.player}
+                      className={[
+                        "grid grid-cols-[2rem_1fr_4rem] items-center gap-2 px-1 py-2.5",
+                        you
+                          ? "rounded-xl bg-emerald-400/10 ring-1 ring-emerald-400/20"
+                          : "",
+                      ].join(" ")}
+                    >
+                      <span
+                        className={`text-center font-black ${i === 0 ? "text-emerald-300" : "text-slate-400"}`}
+                      >
+                        {i + 1}
+                      </span>
+                      <span className="truncate text-sm font-semibold text-slate-100">
+                        {shortAddr(e.player)}
+                        {you && " (you)"}
+                      </span>
+                      <span className="text-right font-bold tabular-nums text-slate-50">
+                        {e.score.toString()}
+                      </span>
+                    </div>
+                  );
+                })
+              ) : (
+                <>
+                  <div className="grid grid-cols-[2rem_1fr_4rem] items-center gap-2 rounded-xl bg-emerald-400/10 px-1 py-2.5 ring-1 ring-emerald-400/20">
+                    <span className="text-center font-black text-emerald-300">
+                      1
+                    </span>
+                    <span className="truncate text-sm font-semibold text-slate-100">
+                      {isConnected ? shortAddr(address) : "You"}
+                    </span>
+                    <span className="text-right font-bold tabular-nums text-slate-50">
+                      {lbEnabled && isConnected
+                        ? onchainBest.toString()
+                        : best}
+                    </span>
+                  </div>
+                  {[2, 3, 4].map((r) => (
+                    <div
+                      key={r}
+                      className="grid grid-cols-[2rem_1fr_4rem] items-center gap-2 px-1 py-2 text-slate-600"
+                    >
+                      <span className="text-center font-bold">{r}</span>
+                      <span className="text-sm">—</span>
+                      <span className="text-right tabular-nums">—</span>
+                    </div>
+                  ))}
+                </>
+              )}
             </Panel>
+
             <p className="rounded-xl bg-slate-900/60 px-3 py-2.5 text-center text-xs text-slate-400 ring-1 ring-slate-800">
-              🌐 Global onchain leaderboard with gasless score submission is
-              coming next.
+              {lbEnabled
+                ? isConnected
+                  ? "Beat your best, then submit the run from Game Over to climb the onchain board."
+                  : "Connect your wallet and post a run to join the onchain leaderboard on Base."
+                : "🌐 Global onchain leaderboard with gasless score submission is coming next."}
             </p>
           </div>
         )}
