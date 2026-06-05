@@ -43,5 +43,9 @@ export const LEADERBOARD_ADDRESS = process.env
 export const LEADERBOARD_CHAIN_ID =
   Number(process.env.NEXT_PUBLIC_CHAIN_ID) || 84532; // Base Sepolia по умолчанию
 
+/** URL CDP Paymaster для gasless-сабмита со smart wallet (пусто = платим газ сами). */
+export const LEADERBOARD_PAYMASTER_URL =
+  process.env.NEXT_PUBLIC_PAYMASTER_URL || undefined;
+
 /** Лидерборд включается, только когда задан адрес контракта. */
 export const leaderboardEnabled = (): boolean => !!LEADERBOARD_ADDRESS;

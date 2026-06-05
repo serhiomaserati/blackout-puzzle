@@ -67,6 +67,7 @@ export default function Home() {
     reset: resetSubmit,
     phase: submitPhase,
     error: submitError,
+    gasless: submitGasless,
   } = useSubmitScore();
 
   // Загрузка статов при старте.
@@ -313,7 +314,7 @@ export default function Home() {
                         </p>
                       ) : submitPhase === "done" ? (
                         <span className="text-xs font-bold text-emerald-300">
-                          On leaderboard ✓
+                          On leaderboard ✓{submitGasless && " · gas-free"}
                         </span>
                       ) : (
                         <button
