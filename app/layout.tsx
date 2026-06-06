@@ -41,6 +41,9 @@ export async function generateMetadata(): Promise<Metadata> {
       "fc:frame": embedJson,
       // Верификация владения доменом в Base Dashboard (base.dev).
       "base:app_id": "6a240987ab28df7fd2fc173c",
+      // Верификация проекта в Talent Protocol (talent app).
+      "talentapp:project_verification":
+        "2454b9c8959e03a5e1e1e1cdfd742829dddf5b4a2eea0bce92298588f7574f0a9d63925931ab368d92264f742ebe08ddcaf66d4b5f76557ceaab9bf451d22ab2",
     },
   };
 }
