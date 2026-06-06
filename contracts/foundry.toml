@@ -18,6 +18,7 @@ runs = 512
 base_sepolia = "${BASE_SEPOLIA_RPC}"
 base = "${BASE_RPC}"
 
+# Etherscan API V2 — forge сам строит v2-эндпоинт с chainid по имени сети.
 [etherscan]
-base_sepolia = { key = "${BASESCAN_API_KEY}", chain = 84532, url = "https://api-sepolia.basescan.org/api" }
-base = { key = "${BASESCAN_API_KEY}", chain = 8453, url = "https://api.basescan.org/api" }
+base_sepolia = { key = "${BASESCAN_API_KEY}", chain = 84532 }
+base = { key = "${BASESCAN_API_KEY}", chain = 8453 }
