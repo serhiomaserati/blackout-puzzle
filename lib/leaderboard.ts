@@ -47,5 +47,12 @@ export const LEADERBOARD_CHAIN_ID =
 export const LEADERBOARD_PAYMASTER_URL =
   process.env.NEXT_PUBLIC_PAYMASTER_URL || undefined;
 
+/** ERC-8021 attribution-суффикс для Builder Code `bc_h8896xf8` (base.dev).
+ *  Предрассчитан через `ox/erc8021` Attribution.toDataSuffix. Дописывается в конец
+ *  calldata транзакции submitScore → ончейн-объём аппа атрибутируется билдеру
+ *  (payout = главный кошелёк), что и формирует builder score. */
+export const BUILDER_CODE_DATA_SUFFIX: `0x${string}` =
+  "0x62635f68383839367866380b0080218021802180218021802180218021";
+
 /** Лидерборд включается, только когда задан адрес контракта. */
 export const leaderboardEnabled = (): boolean => !!LEADERBOARD_ADDRESS;

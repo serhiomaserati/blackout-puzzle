@@ -16,6 +16,7 @@ import {
   LEADERBOARD_ADDRESS,
   LEADERBOARD_CHAIN_ID,
   LEADERBOARD_PAYMASTER_URL,
+  BUILDER_CODE_DATA_SUFFIX,
   leaderboardEnabled,
 } from "./leaderboard";
 import type { Run } from "./arena";
@@ -168,6 +169,11 @@ export function useSubmitScore() {
             ],
             capabilities: {
               paymasterService: { url: LEADERBOARD_PAYMASTER_URL as string },
+              // Builder Code attribution (кошелёк проигнорит, если не поддержит).
+              dataSuffix: {
+                value: BUILDER_CODE_DATA_SUFFIX,
+                optional: true,
+              },
             },
             chainId: LEADERBOARD_CHAIN_ID,
           });
@@ -180,6 +186,8 @@ export function useSubmitScore() {
             functionName: "submitScore",
             args,
             chainId: LEADERBOARD_CHAIN_ID,
+            // Builder Code attribution — дописывается в calldata транзакции.
+            dataSuffix: BUILDER_CODE_DATA_SUFFIX,
           });
           setHash(txHash);
         }
