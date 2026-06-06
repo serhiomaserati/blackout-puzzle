@@ -39,6 +39,8 @@ export async function generateMetadata(): Promise<Metadata> {
       "fc:miniapp": embedJson,
       // Легаси-формат — для совместимости со старыми Farcaster-клиентами.
       "fc:frame": embedJson,
+      // Верификация владения доменом в Base Dashboard (base.dev).
+      "base:app_id": "6a240987ab28df7fd2fc173c",
     },
   };
 }
