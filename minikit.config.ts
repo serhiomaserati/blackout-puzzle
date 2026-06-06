@@ -1,7 +1,11 @@
+// Канонический прод-домен мини-аппа. Манифест ДОЛЖЕН всегда отдавать один и тот
+// же адрес (под него подписан accountAssociation), поэтому не используем VERCEL_URL
+// — он у каждого деплоя свой. NEXT_PUBLIC_URL оставлен как ручной override.
 const ROOT_URL =
   process.env.NEXT_PUBLIC_URL ||
-  (process.env.VERCEL_URL && `https://${process.env.VERCEL_URL}`) ||
-  "http://localhost:3000";
+  (process.env.NODE_ENV === "development"
+    ? "http://localhost:3000"
+    : "https://base-blaster.vercel.app");
 
 /**
  * MiniApp configuration object. Must follow the mini app manifest specification.
