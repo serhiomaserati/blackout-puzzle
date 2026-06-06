@@ -25,7 +25,7 @@ export const minikitConfig = {
     name: "Base Blast",
     subtitle: "Neon arena survival shooter",
     description:
-      "Drag to move, auto-fire at the swarm, and survive as long as you can. Each wave hits harder — rack up your score, beat your best, and share it.",
+      "Twin-stick neon survival: left thumb moves, right thumb aims and fires (WASD + mouse on desktop). Hold off the swarm wave after wave — rack up your score, beat your best onchain, and share it.",
     screenshotUrls: [`${ROOT_URL}/screenshot.png`],
     iconUrl: `${ROOT_URL}/icon.png`,
     splashImageUrl: `${ROOT_URL}/splash.png`,
