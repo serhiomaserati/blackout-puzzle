@@ -71,7 +71,7 @@ const STICK_DEAD = 8;
 // Прогрессия Am – F – C – G (i–VI–III–VII в ля-миноре): бас на 1-й и 3-й доле +
 // арпеджио аккордовыми тонами 8-ми нотами. Планируется через AudioContext-часы
 // с lookahead, так что не дёргается под нагрузкой игрового rAF.
-const MUSIC_VOL = 0.18; // общий уровень музыкальной шины
+const MUSIC_VOL = 0.3; // общий уровень музыкальной шины
 const MUSIC_BPM = 96;
 const MUSIC_STEPS_PER_BAR = 16; // 16-е ноты в такте
 const MUSIC_BARS = 4;
@@ -124,7 +124,7 @@ export class ArenaGame {
 
   // Фоновая музыка
   private musicGain?: GainNode;
-  private musicTimer?: number;
+  private musicOn = false;
   private musicStep = 0;
   private musicNextTime = 0;
 
@@ -249,6 +249,7 @@ export class ArenaGame {
       if (this.sim.gameOver) break;
     }
 
+    this.scheduleMusic();
     this.updateCosmetic(frame);
     this.render();
 
@@ -405,7 +406,7 @@ export class ArenaGame {
 
   private startMusic(): void {
     const ac = this.audio;
-    if (!ac || this.musicTimer != null) return;
+    if (!ac) return;
     if (!this.musicGain) {
       this.musicGain = ac.createGain();
       this.musicGain.gain.value = this.muted ? 0 : MUSIC_VOL;
@@ -413,24 +414,21 @@ export class ArenaGame {
     }
     this.musicStep = 0;
     this.musicNextTime = ac.currentTime + 0.1;
-    // Lookahead-планировщик: тикаем чаще, чем длится шаг, и ставим ноты в очередь
-    // по часам AudioContext — устойчиво к джиттеру setInterval.
-    this.musicTimer = window.setInterval(() => this.scheduleMusic(), 25);
+    this.musicOn = true;
   }
 
   private stopMusic(): void {
-    if (this.musicTimer != null) {
-      clearInterval(this.musicTimer);
-      this.musicTimer = undefined;
-    }
+    this.musicOn = false;
   }
 
+  /** Lookahead-планировщик музыки: ставим ноты в очередь по часам AudioContext.
+   *  Вызывается из игрового rAF-цикла — надёжнее setInterval на мобиле. */
   private scheduleMusic(): void {
     const ac = this.audio;
     const out = this.musicGain;
-    if (!ac || !out) return;
+    if (!this.musicOn || !ac || !out) return;
     const totalSteps = MUSIC_STEPS_PER_BAR * MUSIC_BARS;
-    while (this.musicNextTime < ac.currentTime + 0.12) {
+    while (this.musicNextTime < ac.currentTime + 0.15) {
       this.playMusicStep(this.musicStep, this.musicNextTime, out);
       this.musicStep = (this.musicStep + 1) % totalSteps;
       this.musicNextTime += MUSIC_STEP;
@@ -441,15 +439,22 @@ export class ArenaGame {
     const bar = Math.floor(step / MUSIC_STEPS_PER_BAR) % MUSIC_PROG.length;
     const s = step % MUSIC_STEPS_PER_BAR;
     const chord = MUSIC_PROG[bar];
-    // Бас на 1-й и 3-й доле такта (тёплый, через ФНЧ) — бонус для наушников.
-    if (s === 0 || s === 8) {
-      this.musicNote(chord.bass, t, 0.42, "sawtooth", 0.6, out, 700);
+    const barDur = MUSIC_STEP * MUSIC_STEPS_PER_BAR;
+    // Пэд: тянем весь аккорд на такт — сплошное «тело» фона (а не редкие щипки).
+    if (s === 0) {
+      for (const n of chord.notes) {
+        this.musicNote(n * 2, t, barDur * 0.98, "triangle", 0.16, out, 2000);
+      }
     }
-    // Арпеджио 8-ми нотами, на октаву выше (350–800 Гц) — пробивает на любых
-    // динамиках, включая телефонные. Яркая «пила» = ведущий голос.
+    // Бас на 1-й и 3-й доле такта (тёплый, через ФНЧ).
+    if (s === 0 || s === 8) {
+      this.musicNote(chord.bass, t, 0.5, "sawtooth", 0.6, out, 700);
+    }
+    // Ведущее арпеджио 8-ми нотами, октавой выше — яркая «пила», пробивает на
+    // телефонных динамиках. Ноты слегка перекрываются → слитная линия.
     if (s % 2 === 0) {
       const tone = chord.notes[(s / 2) % chord.notes.length] * 2;
-      this.musicNote(tone, t, 0.18, "sawtooth", 0.5, out, 2600);
+      this.musicNote(tone, t, 0.26, "sawtooth", 0.42, out, 2600);
     }
   }
 
