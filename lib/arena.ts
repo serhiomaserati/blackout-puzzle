@@ -67,6 +67,22 @@ const newStick = (): Stick => ({
 const STICK_MAX = 70; // радиус тач-стика (виртуальные единицы)
 const STICK_DEAD = 8;
 
+// ── Фоновая музыка (процедурный synthwave-луп, без аудиофайлов) ───────────────
+// Прогрессия Am – F – C – G (i–VI–III–VII в ля-миноре): бас на 1-й и 3-й доле +
+// арпеджио аккордовыми тонами 8-ми нотами. Планируется через AudioContext-часы
+// с lookahead, так что не дёргается под нагрузкой игрового rAF.
+const MUSIC_VOL = 0.09; // общий уровень (тихо, чтобы SFX были сверху)
+const MUSIC_BPM = 96;
+const MUSIC_STEPS_PER_BAR = 16; // 16-е ноты в такте
+const MUSIC_BARS = 4;
+const MUSIC_STEP = 60 / MUSIC_BPM / 4; // длительность 16-й ноты, сек
+const MUSIC_PROG: ReadonlyArray<{ bass: number; notes: readonly number[] }> = [
+  { bass: 110.0, notes: [220.0, 261.63, 329.63] }, // Am: A2 / A3 C4 E4
+  { bass: 87.31, notes: [174.61, 220.0, 261.63] }, // F:  F2 / F3 A3 C4
+  { bass: 130.81, notes: [261.63, 329.63, 392.0] }, // C:  C3 / C4 E4 G4
+  { bass: 98.0, notes: [196.0, 246.94, 293.66] }, // G:  G2 / G3 B3 D4
+];
+
 export class ArenaGame {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
@@ -105,6 +121,12 @@ export class ArenaGame {
   // Звук
   private audio?: AudioContext;
   private muted = false;
+
+  // Фоновая музыка
+  private musicGain?: GainNode;
+  private musicTimer?: number;
+  private musicStep = 0;
+  private musicNextTime = 0;
 
   private resizeObs?: ResizeObserver;
 
@@ -149,6 +171,7 @@ export class ArenaGame {
       if (Ctor) this.audio = new Ctor();
     }
     void this.audio?.resume?.();
+    this.startMusic();
     this.running = true;
     this.lastTs = performance.now();
     this.acc = 0;
@@ -158,6 +181,7 @@ export class ArenaGame {
   stop(): void {
     this.running = false;
     cancelAnimationFrame(this.raf);
+    this.stopMusic();
   }
 
   destroy(): void {
@@ -168,6 +192,13 @@ export class ArenaGame {
 
   setMuted(muted: boolean): void {
     this.muted = muted;
+    if (this.musicGain && this.audio) {
+      this.musicGain.gain.setTargetAtTime(
+        muted ? 0 : MUSIC_VOL,
+        this.audio.currentTime,
+        0.02,
+      );
+    }
   }
 
   /** Записанный ран (seed + инпуты по тикам) для серверной проверки. */
@@ -368,6 +399,89 @@ export class ArenaGame {
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.start(t);
     o.stop(t + dur + 0.02);
+  }
+
+  // ── Фоновая музыка ────────────────────────────────────────────────────────
+
+  private startMusic(): void {
+    const ac = this.audio;
+    if (!ac || this.musicTimer != null) return;
+    if (!this.musicGain) {
+      this.musicGain = ac.createGain();
+      this.musicGain.gain.value = this.muted ? 0 : MUSIC_VOL;
+      this.musicGain.connect(ac.destination);
+    }
+    this.musicStep = 0;
+    this.musicNextTime = ac.currentTime + 0.1;
+    // Lookahead-планировщик: тикаем чаще, чем длится шаг, и ставим ноты в очередь
+    // по часам AudioContext — устойчиво к джиттеру setInterval.
+    this.musicTimer = window.setInterval(() => this.scheduleMusic(), 25);
+  }
+
+  private stopMusic(): void {
+    if (this.musicTimer != null) {
+      clearInterval(this.musicTimer);
+      this.musicTimer = undefined;
+    }
+  }
+
+  private scheduleMusic(): void {
+    const ac = this.audio;
+    const out = this.musicGain;
+    if (!ac || !out) return;
+    const totalSteps = MUSIC_STEPS_PER_BAR * MUSIC_BARS;
+    while (this.musicNextTime < ac.currentTime + 0.12) {
+      this.playMusicStep(this.musicStep, this.musicNextTime, out);
+      this.musicStep = (this.musicStep + 1) % totalSteps;
+      this.musicNextTime += MUSIC_STEP;
+    }
+  }
+
+  private playMusicStep(step: number, t: number, out: GainNode): void {
+    const bar = Math.floor(step / MUSIC_STEPS_PER_BAR) % MUSIC_PROG.length;
+    const s = step % MUSIC_STEPS_PER_BAR;
+    const chord = MUSIC_PROG[bar];
+    // Бас на 1-й и 3-й доле такта (тёплый, через ФНЧ).
+    if (s === 0 || s === 8) {
+      this.musicNote(chord.bass, t, 0.42, "sawtooth", 0.5, out, 600);
+    }
+    // Арпеджио 8-ми нотами: перебираем тоны аккорда.
+    if (s % 2 === 0) {
+      const tone = chord.notes[(s / 2) % chord.notes.length];
+      this.musicNote(tone, t, 0.16, "triangle", 0.22, out);
+    }
+  }
+
+  private musicNote(
+    freq: number,
+    t: number,
+    dur: number,
+    type: OscillatorType,
+    vol: number,
+    out: GainNode,
+    lowpassHz?: number,
+  ): void {
+    const ac = this.audio;
+    if (!ac) return;
+    const o = ac.createOscillator();
+    const g = ac.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    o.connect(g);
+    if (lowpassHz) {
+      const f = ac.createBiquadFilter();
+      f.type = "lowpass";
+      f.frequency.setValueAtTime(lowpassHz, t);
+      g.connect(f);
+      f.connect(out);
+    } else {
+      g.connect(out);
+    }
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.start(t);
+    o.stop(t + dur + 0.03);
   }
 
   // ── Отрисовка ─────────────────────────────────────────────────────────────
