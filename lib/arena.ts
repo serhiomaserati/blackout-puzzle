@@ -71,7 +71,7 @@ const STICK_DEAD = 8;
 // Прогрессия Am – F – C – G (i–VI–III–VII в ля-миноре): бас на 1-й и 3-й доле +
 // арпеджио аккордовыми тонами 8-ми нотами. Планируется через AudioContext-часы
 // с lookahead, так что не дёргается под нагрузкой игрового rAF.
-const MUSIC_VOL = 0.09; // общий уровень (тихо, чтобы SFX были сверху)
+const MUSIC_VOL = 0.18; // общий уровень музыкальной шины
 const MUSIC_BPM = 96;
 const MUSIC_STEPS_PER_BAR = 16; // 16-е ноты в такте
 const MUSIC_BARS = 4;
@@ -441,14 +441,15 @@ export class ArenaGame {
     const bar = Math.floor(step / MUSIC_STEPS_PER_BAR) % MUSIC_PROG.length;
     const s = step % MUSIC_STEPS_PER_BAR;
     const chord = MUSIC_PROG[bar];
-    // Бас на 1-й и 3-й доле такта (тёплый, через ФНЧ).
+    // Бас на 1-й и 3-й доле такта (тёплый, через ФНЧ) — бонус для наушников.
     if (s === 0 || s === 8) {
-      this.musicNote(chord.bass, t, 0.42, "sawtooth", 0.5, out, 600);
+      this.musicNote(chord.bass, t, 0.42, "sawtooth", 0.6, out, 700);
     }
-    // Арпеджио 8-ми нотами: перебираем тоны аккорда.
+    // Арпеджио 8-ми нотами, на октаву выше (350–800 Гц) — пробивает на любых
+    // динамиках, включая телефонные. Яркая «пила» = ведущий голос.
     if (s % 2 === 0) {
-      const tone = chord.notes[(s / 2) % chord.notes.length];
-      this.musicNote(tone, t, 0.16, "triangle", 0.22, out);
+      const tone = chord.notes[(s / 2) % chord.notes.length] * 2;
+      this.musicNote(tone, t, 0.18, "sawtooth", 0.5, out, 2600);
     }
   }
 
