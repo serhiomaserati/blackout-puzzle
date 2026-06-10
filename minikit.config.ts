@@ -31,8 +31,10 @@ export const minikitConfig = {
     version: "1",
     name: "Base Blast",
     subtitle: "Neon arena survival shooter",
+    // Farcaster ограничивает description 170 символами и запрещает спецсимволы
+    // (@ # $ % ^ & * + = / \ | ~ « »). Держим строку короткой и чистой.
     description:
-      "Twin-stick neon survival: left thumb moves, right thumb aims and fires (WASD + mouse on desktop). Hold off the swarm wave after wave — rack up your score, beat your best onchain, and share it.",
+      "Twin-stick neon survival shooter. Move with one thumb, aim and fire with the other. Hold off the swarm wave after wave, beat your best onchain, and share it.",
     screenshotUrls: [`${ROOT_URL}/screenshot.png`],
     iconUrl: `${ROOT_URL}/icon.png`,
     splashImageUrl: `${ROOT_URL}/splash.png`,
