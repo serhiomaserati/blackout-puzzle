@@ -13,12 +13,15 @@ const ROOT_URL =
  * @see {@link https://docs.base.org/mini-apps/features/manifest}
  */
 export const minikitConfig = {
-  // ⚠️ Эти три поля НЕ заполняем вручную — их генерирует Base Build при
-  // верификации домена (account association). Подставишь после деплоя (см. Фаза 4).
+  // Подпись владения доменом (JSON Farcaster Signature), сгенерированная
+  // Farcaster-тулом для домена base-blaster.vercel.app. Привязывает мини-аппу
+  // к FID 575931 (custody 0x386e97e358B8169cf920C429F8ca28a3d45a816E).
   accountAssociation: {
-    header: "",
-    payload: "",
-    signature: "",
+    header:
+      "eyJmaWQiOjU3NTkzMSwidHlwZSI6ImN1c3RvZHkiLCJrZXkiOiIweDM4NmU5N2UzNThCODE2OWNmOTIwQzQyOUY4Y2EyOGEzZDQ1YTgxNkUifQ",
+    payload: "eyJkb21haW4iOiJiYXNlLWJsYXN0ZXIudmVyY2VsLmFwcCJ9",
+    signature:
+      "Q8KMxhpPVyWD9LnXKTzZ6FNgKs+Ml4EEuenIO/DZfulbv1Is0AAv4jBSQ9hm2hRHFkN/ME7EydQEmuKhAeM3Yxw=",
   },
   // Адрес-владелец из Base Build (тоже подставляется при верификации).
   baseBuilder: {
